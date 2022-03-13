@@ -3,7 +3,16 @@
 ### A SOCKS5 Server Library for Java
 
 ## Installation
-Instructions to follow soon.
+You can either use the GitHub Gradle Registry [here](https://github.com/Sascha-T/sandals/packages), or use **jitpack.io**:
+```gradle
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+dependencies {
+    implementation 'com.github.Sascha-T:sandals:v1.0.0-rc.1'
+}
+```
+
 
 ## Architecture
 This SOCKS5 server has extensive infrastructure for custom domain resolving, just like in Tor Daemon's SOCKS5 server which handles any connections to a *.onion domain over the TOR network. \
