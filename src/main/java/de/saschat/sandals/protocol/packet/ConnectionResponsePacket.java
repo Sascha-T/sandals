@@ -16,28 +16,36 @@ public class ConnectionResponsePacket extends Packet {
     public ConnectionResponsePacket(ByteBuffer buffer) {
         super(buffer);
         byte v = buffer.get();
-        if(v != 0x05)
+        if (v != 0x05)
             throw new InvalidSOCKSVersionException(v, 5);
         RESPONSE_CODE = ResponseCode.from(buffer.get());
         buffer.get();
         BIND_ADDRESS_TYPE = AddressType.from(buffer.get());
         switch (BIND_ADDRESS_TYPE) {
-            case IPV4 -> BIND_ADDRESS = new byte[] {buffer.get(), buffer.get(), buffer.get(), buffer.get()};
-            case IPV6 -> BIND_ADDRESS = new byte[] {
-                buffer.get(), buffer.get(), buffer.get(), buffer.get(),
-                buffer.get(), buffer.get(), buffer.get(), buffer.get(),
-                buffer.get(), buffer.get(), buffer.get(), buffer.get(),
-                buffer.get(), buffer.get(), buffer.get(), buffer.get()
-            };
-            case DOMAIN -> {
+            case IPV4: {
+                BIND_ADDRESS = new byte[]{buffer.get(), buffer.get(), buffer.get(), buffer.get()};
+                break;
+            }
+            case IPV6: {
+                BIND_ADDRESS = new byte[]{
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get(),
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get(),
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get(),
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get()
+                };
+                break;
+            }
+            case DOMAIN: {
                 byte len = buffer.get();
                 byte[] domainData = new byte[len];
                 buffer.get(domainData);
                 BIND_ADDRESS = domainData;
+                break;
             }
         }
         PORT = buffer.getShort();
     }
+
     public ConnectionResponsePacket(ResponseCode code, AddressType type, byte[] address, short port) {
         super(null);
         this.RESPONSE_CODE = code;
@@ -68,6 +76,7 @@ public class ConnectionResponsePacket extends Packet {
         ADDRESS_TYPE_NOT_SUPPORTED((byte) 0x08);
 
         byte data;
+
         ResponseCode(byte data) {
             this.data = data;
         }

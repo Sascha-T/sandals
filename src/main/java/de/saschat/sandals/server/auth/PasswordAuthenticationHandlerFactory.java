@@ -43,7 +43,11 @@ public class PasswordAuthenticationHandlerFactory implements AuthHandlerFactory 
             return false;
         }
 
-        public record PasswordEntry(String name, String pass) {}
+        public class PasswordEntry {
+            public String name;
+            public String pass;
+            public PasswordEntry(String n, String p) {this.name = n; this.pass = p;}
+        }
     }
 
     public interface PasswordChecker {

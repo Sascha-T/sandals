@@ -17,24 +17,31 @@ public class ConnectionRequestPacket extends Packet {
     public ConnectionRequestPacket(ByteBuffer buffer) throws UnknownHostException {
         super(buffer);
         byte v = buffer.get();
-        if(v != 0x05)
+        if (v != 0x05)
             throw new InvalidSOCKSVersionException(v, 5);
         COMMAND = Command.from(buffer.get());
         buffer.get(); // Reserved.
         ADDRESS_TYPE = AddressType.from(buffer.get());
         switch (ADDRESS_TYPE) {
-            case IPV4 -> ADDRESS = new byte[] {buffer.get(), buffer.get(), buffer.get(), buffer.get()};
-            case IPV6 -> ADDRESS = new byte[] {
-                buffer.get(), buffer.get(), buffer.get(), buffer.get(),
-                buffer.get(), buffer.get(), buffer.get(), buffer.get(),
-                buffer.get(), buffer.get(), buffer.get(), buffer.get(),
-                buffer.get(), buffer.get(), buffer.get(), buffer.get()
-            };
-            case DOMAIN -> {
+            case IPV4: {
+                ADDRESS = new byte[]{buffer.get(), buffer.get(), buffer.get(), buffer.get()};
+                break;
+            }
+            case IPV6: {
+                ADDRESS = new byte[]{
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get(),
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get(),
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get(),
+                    buffer.get(), buffer.get(), buffer.get(), buffer.get()
+                };
+                break;
+            }
+            case DOMAIN: {
                 byte len = buffer.get();
                 byte[] domainData = new byte[len];
                 buffer.get(domainData);
                 ADDRESS = domainData;
+                break;
             }
         }
         PORT = buffer.getShort();
@@ -55,6 +62,7 @@ public class ConnectionRequestPacket extends Packet {
         FORWARD_UDP((byte) 0x03);
 
         public byte cmd;
+
         Command(byte cmd) {
             this.cmd = cmd;
         }

@@ -20,9 +20,10 @@ import java.util.*;
 
 public class SOCKS5Server implements Runnable {
     public ServerSocketChannel mainServer;
-    public List<AuthHandlerFactory> authMethods = List.of(new NoAuthenticationHandlerFactory());
+    public List<AuthHandlerFactory> authMethods;
     public AddressResolver resolver;
     public long timeout;
+
     protected SOCKS5Server(int port, List<AuthHandlerFactory> factories, AddressResolver resolver, long timeout) throws IOException {
         this.mainServer = ServerSocketChannel.open().bind(new InetSocketAddress(port));
         mainServer.configureBlocking(false);
@@ -30,6 +31,7 @@ public class SOCKS5Server implements Runnable {
         this.resolver = resolver;
         this.timeout = timeout;
     }
+
     public void run() {
         try {
             Selector selector = Selector.open();
@@ -38,23 +40,23 @@ public class SOCKS5Server implements Runnable {
             ByteBuffer mainBuffer = ByteBuffer.allocate(65535);
             ByteBuffer secondaryBuffer = ByteBuffer.allocate(65535);
 
-            while(true) {
-                if(selector.selectNow() == 0) continue;
+            while (true) {
+                if (selector.selectNow() == 0) continue;
                 Iterator<SelectionKey> keys = selector.selectedKeys().iterator();
-                while(keys.hasNext()) {
+                while (keys.hasNext()) {
                     SelectionKey key = keys.next();
                     keys.remove();
                     mainBuffer.clear();
                     secondaryBuffer.clear();
 
                     try {
-                        if(key.isReadable()) {
+                        if (key.isReadable()) {
                             SocketChannel channel = (SocketChannel) key.channel();
                             SessionData data = (SessionData) key.attachment();
-                            if(!channel.isOpen())
+                            if (!channel.isOpen())
                                 continue;
 
-                            if(data.status == SessionData.Status.CONNECTING) {
+                            if (data.status == SessionData.Status.CONNECTING) {
                                 // Receive methods.
                                 channel.read(mainBuffer);
                                 mainBuffer.flip();
@@ -62,15 +64,15 @@ public class SOCKS5Server implements Runnable {
 
                                 // Choose method.
                                 AuthHandlerFactory use = null;
-                                for (AuthHandlerFactory factory: authMethods) {
-                                    if(packet.METHODS.contains(factory.id())) {
+                                for (AuthHandlerFactory factory : authMethods) {
+                                    if (packet.METHODS.contains(factory.id())) {
                                         use = factory;
                                         break;
                                     }
                                 }
 
                                 byte method = (byte) 0xFF;
-                                if(use != null)
+                                if (use != null)
                                     method = use.id();
 
                                 AuthReplyPacket reply = new AuthReplyPacket(method);
@@ -78,7 +80,7 @@ public class SOCKS5Server implements Runnable {
                                 secondaryBuffer.flip();
                                 channel.write(secondaryBuffer);
 
-                                if(method == (byte) 0xFF) {
+                                if (method == (byte) 0xFF) {
                                     // Close connection.
                                     channel.close();
                                     continue;
@@ -86,18 +88,18 @@ public class SOCKS5Server implements Runnable {
 
                                 data.status = SessionData.Status.AUTHENTICATING;
                                 data.handler = use.create();
-                                if(data.handler.done())
-                                    if(data.handler.authorized())
+                                if (data.handler.done())
+                                    if (data.handler.authorized())
                                         data.status = SessionData.Status.AUTHENTICATED;
-                            } else if(data.status == SessionData.Status.AUTHENTICATING) {
+                            } else if (data.status == SessionData.Status.AUTHENTICATING) {
                                 channel.read(mainBuffer);
                                 mainBuffer.flip();
                                 data.handler.data(mainBuffer, secondaryBuffer);
                                 secondaryBuffer.flip();
-                                if(secondaryBuffer.limit() > 0) // Potentially unnecessary comparison.
+                                if (secondaryBuffer.limit() > 0) // Potentially unnecessary comparison.
                                     channel.write(secondaryBuffer);
 
-                                if(data.handler.done()) {
+                                if (data.handler.done()) {
                                     if (data.handler.authorized())
                                         data.status = SessionData.Status.AUTHENTICATED;
                                     else {
@@ -105,22 +107,32 @@ public class SOCKS5Server implements Runnable {
                                         continue;
                                     }
                                 }
-                            } else if(data.status == SessionData.Status.AUTHENTICATED) {
+                            } else if (data.status == SessionData.Status.AUTHENTICATED) {
                                 channel.read(mainBuffer);
                                 mainBuffer.flip();
                                 ConnectionRequestPacket request = new ConnectionRequestPacket(mainBuffer);
-                                InetAddress address;
+                                InetAddress address = null;
                                 try {
-                                    address = switch (request.ADDRESS_TYPE) {
-                                        case IPV4 -> resolver.resolveIPv4(request.ADDRESS);
-                                        case IPV6 -> resolver.resolveIPv6(request.ADDRESS);
-                                        case DOMAIN -> resolver.resolve(new String(request.ADDRESS));
-                                    };
+                                    switch (request.ADDRESS_TYPE) {
+                                        case IPV4: {
+                                            address = resolver.resolveIPv4(request.ADDRESS);
+                                            break;
+                                        }
+                                        case IPV6: {
+                                            address = resolver.resolveIPv6(request.ADDRESS);
+                                            break;
+                                        }
+                                        case DOMAIN: {
+                                            address = resolver.resolve(new String(request.ADDRESS));
+                                            break;
+                                        }
+                                    }
+                                    ;
                                 } catch (Exception ex) {
                                     ConnectionResponsePacket packet = new ConnectionResponsePacket(
                                         ConnectionResponsePacket.ResponseCode.HOST_UNREACHABLE,
                                         AddressType.IPV4,
-                                        new byte[] {0, 0, 0, 0},
+                                        new byte[]{0, 0, 0, 0},
                                         (short) 0
                                     );
                                     packet.write(secondaryBuffer);
@@ -132,14 +144,14 @@ public class SOCKS5Server implements Runnable {
                                 InetSocketAddress socket = new InetSocketAddress(address, request.PORT);
                                 data.address = socket;
                                 switch (request.COMMAND) {
-                                    case BIND_TCP -> {
+                                    case BIND_TCP: {
                                         data.listening = true;
                                         data.type = SessionData.Type.TCP;
                                         // @TODO: Add support
                                         channel.close();
                                         continue;
                                     }
-                                    case CONNECT_TCP -> {
+                                    case CONNECT_TCP: {
                                         data.listening = false;
                                         data.type = SessionData.Type.TCP;
                                         try {
@@ -147,14 +159,14 @@ public class SOCKS5Server implements Runnable {
                                             data.tcpChannel.configureBlocking(false);
                                             data.tcpChannel.connect(socket);
                                             long time = Instant.now().toEpochMilli();
-                                            while(!data.tcpChannel.finishConnect()) {
-                                                if(Instant.now().toEpochMilli() > time + timeout)
+                                            while (!data.tcpChannel.finishConnect()) {
+                                                if (Instant.now().toEpochMilli() > time + timeout)
                                                     throw new ConnectException("timeout");
                                             }
                                             ConnectionResponsePacket packet = new ConnectionResponsePacket(
                                                 ConnectionResponsePacket.ResponseCode.SUCCEEDED,
                                                 AddressType.IPV4,
-                                                new byte[] {0, 0, 0, 0},
+                                                new byte[]{0, 0, 0, 0},
                                                 (short) 0
                                             );
                                             packet.write(secondaryBuffer);
@@ -165,7 +177,7 @@ public class SOCKS5Server implements Runnable {
                                             ConnectionResponsePacket packet = new ConnectionResponsePacket(
                                                 ConnectionResponsePacket.ResponseCode.CONNECTION_NOT_ALLOWED,
                                                 AddressType.IPV4,
-                                                new byte[] {0, 0, 0, 0},
+                                                new byte[]{0, 0, 0, 0},
                                                 (short) 0
                                             );
                                             packet.write(secondaryBuffer);
@@ -178,7 +190,7 @@ public class SOCKS5Server implements Runnable {
                                             ConnectionResponsePacket packet = new ConnectionResponsePacket(
                                                 ConnectionResponsePacket.ResponseCode.HOST_UNREACHABLE,
                                                 AddressType.IPV4,
-                                                new byte[] {0, 0, 0, 0},
+                                                new byte[]{0, 0, 0, 0},
                                                 (short) 0
                                             );
                                             packet.write(secondaryBuffer);
@@ -191,7 +203,7 @@ public class SOCKS5Server implements Runnable {
                                             ConnectionResponsePacket packet = new ConnectionResponsePacket(
                                                 ConnectionResponsePacket.ResponseCode.SERVER_ERROR,
                                                 AddressType.IPV4,
-                                                new byte[] {0, 0, 0, 0},
+                                                new byte[]{0, 0, 0, 0},
                                                 (short) 0
                                             );
                                             packet.write(secondaryBuffer);
@@ -200,8 +212,9 @@ public class SOCKS5Server implements Runnable {
                                             channel.close();
                                             continue;
                                         }
+                                        break;
                                     }
-                                    case FORWARD_UDP -> {
+                                    case FORWARD_UDP: {
                                         data.type = SessionData.Type.UDP;
                                         // @TODO: Add support
                                         channel.close();
@@ -210,13 +223,13 @@ public class SOCKS5Server implements Runnable {
                                 }
                                 data.status = SessionData.Status.ROUTED;
                             } else if (data.status == SessionData.Status.ROUTED) {
-                                if(data.type == SessionData.Type.TCP)
-                                    if(data.listening) {
+                                if (data.type == SessionData.Type.TCP)
+                                    if (data.listening) {
                                         // @TODO: Add support
                                         channel.close();
                                     } else {
                                         channel.read(mainBuffer);
-                                        if(!data.tcpChannel.isOpen())
+                                        if (!data.tcpChannel.isOpen())
                                             channel.close();
                                         mainBuffer.flip();
                                         data.tcpChannel.write(mainBuffer);
@@ -226,18 +239,18 @@ public class SOCKS5Server implements Runnable {
                         if (key.isWritable()) {
                             SocketChannel channel = (SocketChannel) key.channel();
                             SessionData data = (SessionData) key.attachment();
-                            if(!channel.isOpen())
+                            if (!channel.isOpen())
                                 continue;
-                            if(data.status == SessionData.Status.ROUTED) {
-                                if(data.type == SessionData.Type.TCP)
-                                    if(data.listening) {
+                            if (data.status == SessionData.Status.ROUTED) {
+                                if (data.type == SessionData.Type.TCP)
+                                    if (data.listening) {
                                         // @TODO: Add support
                                         channel.close();
                                     } else {
-                                        if(!data.tcpChannel.isOpen())
+                                        if (!data.tcpChannel.isOpen())
                                             channel.close();
                                         int a = data.tcpChannel.read(mainBuffer);
-                                        if(a > 0) {
+                                        if (a > 0) {
                                             mainBuffer.flip();
                                             channel.write(mainBuffer);
                                         }

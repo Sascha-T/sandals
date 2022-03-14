@@ -9,7 +9,7 @@ repositories {
     maven { url 'https://jitpack.io' }
 }
 dependencies {
-    implementation 'com.github.Sascha-T:sandals:v1.0.0-rc.1'
+    implementation 'com.github.Sascha-T:sandals:v1.0.0-rc.2'
 }
 ```
 
