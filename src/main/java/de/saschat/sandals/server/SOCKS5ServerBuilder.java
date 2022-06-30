@@ -4,6 +4,8 @@ import de.saschat.sandals.server.address.AddressResolver;
 import de.saschat.sandals.server.address.DefaultAddressResolver;
 import de.saschat.sandals.server.auth.AuthHandlerFactory;
 import de.saschat.sandals.server.auth.NoAuthenticationHandlerFactory;
+import de.saschat.sandals.server.connection.ConnectionHandler;
+import de.saschat.sandals.server.connection.DefaultConnectionHandler;
 
 import java.io.IOException;
 import java.util.LinkedList;
@@ -11,20 +13,25 @@ import java.util.List;
 
 public class SOCKS5ServerBuilder {
     List<AuthHandlerFactory> factories = new LinkedList<>();
+    ConnectionHandler handler = null;
     AddressResolver resolver = null;
     int port = -1;
     long timeout = -1;
+
     public SOCKS5ServerBuilder(boolean useDefault) {
-        if(useDefault) {
+        if (useDefault) {
             factories.add(new NoAuthenticationHandlerFactory());
+            handler = new DefaultConnectionHandler();
             resolver = new DefaultAddressResolver();
             port = 1080;
             timeout = 5000;
         }
     }
+
     public SOCKS5ServerBuilder() {
         this(false);
     }
+
     public SOCKS5ServerBuilder clearAuthHandlerFactories() {
         factories.clear();
         return this;
@@ -39,6 +46,10 @@ public class SOCKS5ServerBuilder {
         this.resolver = resolver;
         return this;
     }
+    public SOCKS5ServerBuilder setConnectionHandler(ConnectionHandler handler) {
+        this.handler = handler;
+        return this;
+    }
 
     public SOCKS5ServerBuilder setPort(short port) {
         this.port = port;
@@ -51,14 +62,16 @@ public class SOCKS5ServerBuilder {
     }
 
     public SOCKS5Server build() throws IOException {
-        if(port == -1)
+        if (port == -1)
             throw new RuntimeException("Port not specified in SOCKS5ServerBuilder.");
-        if(timeout == -1)
+        if (timeout == -1)
             throw new RuntimeException("Timeout not specified in SOCKS5ServerBuilder.");
-        if(factories.size() == 0)
+        if (factories.size() == 0)
             throw new RuntimeException("No authentication methods specified in SOCKS5ServerBuilder.");
-        if(resolver == null)
+        if (handler == null)
+            throw new RuntimeException("No connection handlers specified in SOCKS5ServerBuilder.");
+        if (resolver == null)
             throw new RuntimeException("Resolver not specified in SOCKS5ServerBuilder.");
-        return new SOCKS5Server(port, factories, resolver, timeout);
+        return new SOCKS5Server(port, factories, handler, resolver, timeout);
     }
 }

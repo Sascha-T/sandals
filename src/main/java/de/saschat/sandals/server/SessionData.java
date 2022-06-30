@@ -3,6 +3,7 @@ package de.saschat.sandals.server;
 import de.saschat.sandals.server.auth.AuthHandler;
 
 import java.net.InetSocketAddress;
+import java.nio.channels.ByteChannel;
 import java.nio.channels.SocketChannel;
 
 public class SessionData {
@@ -16,7 +17,7 @@ public class SessionData {
     public Type type;
     public InetSocketAddress address;
 
-    public SocketChannel tcpChannel; // type == TCP && !listening
+    public ByteChannel readChannel; // type == TCP && !listening
 
     public enum Type {
         TCP, UDP
@@ -39,7 +40,7 @@ public class SessionData {
             ", listening=" + listening +
             ", type=" + type +
             ", address=" + address +
-            ", tcpChannel=" + tcpChannel +
+            ", tcpChannel=" + readChannel +
             '}';
     }
 }

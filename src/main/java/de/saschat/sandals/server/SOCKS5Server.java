@@ -7,7 +7,7 @@ import de.saschat.sandals.protocol.packet.ConnectionRequestPacket;
 import de.saschat.sandals.protocol.packet.ConnectionResponsePacket;
 import de.saschat.sandals.server.address.AddressResolver;
 import de.saschat.sandals.server.auth.AuthHandlerFactory;
-import de.saschat.sandals.server.auth.NoAuthenticationHandlerFactory;
+import de.saschat.sandals.server.connection.ConnectionHandler;
 
 import java.io.IOException;
 import java.net.ConnectException;
@@ -15,19 +15,20 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
-import java.time.Instant;
 import java.util.*;
 
 public class SOCKS5Server implements Runnable {
     public ServerSocketChannel mainServer;
     public List<AuthHandlerFactory> authMethods;
+    public ConnectionHandler handler;
     public AddressResolver resolver;
     public long timeout;
 
-    protected SOCKS5Server(int port, List<AuthHandlerFactory> factories, AddressResolver resolver, long timeout) throws IOException {
+    protected SOCKS5Server(int port, List<AuthHandlerFactory> factories, ConnectionHandler handlers, AddressResolver resolver, long timeout) throws IOException {
         this.mainServer = ServerSocketChannel.open().bind(new InetSocketAddress(port));
         mainServer.configureBlocking(false);
         this.authMethods = factories;
+        this.handler = handlers;
         this.resolver = resolver;
         this.timeout = timeout;
     }
@@ -50,7 +51,7 @@ public class SOCKS5Server implements Runnable {
                     secondaryBuffer.clear();
 
                     try {
-                        if (key.isReadable()) {
+                        if (key.isValid() && key.isReadable()) {
                             SocketChannel channel = (SocketChannel) key.channel();
                             SessionData data = (SessionData) key.attachment();
                             if (!channel.isOpen())
@@ -129,16 +130,7 @@ public class SOCKS5Server implements Runnable {
                                     }
                                     ;
                                 } catch (Exception ex) {
-                                    ConnectionResponsePacket packet = new ConnectionResponsePacket(
-                                        ConnectionResponsePacket.ResponseCode.HOST_UNREACHABLE,
-                                        AddressType.IPV4,
-                                        new byte[]{0, 0, 0, 0},
-                                        (short) 0
-                                    );
-                                    packet.write(secondaryBuffer);
-                                    secondaryBuffer.flip();
-                                    channel.write(secondaryBuffer);
-                                    channel.close();
+                                    sendStatus(ConnectionResponsePacket.ResponseCode.HOST_UNREACHABLE, secondaryBuffer, channel);
                                     continue;
                                 }
                                 InetSocketAddress socket = new InetSocketAddress(address, request.PORT);
@@ -155,60 +147,22 @@ public class SOCKS5Server implements Runnable {
                                         data.listening = false;
                                         data.type = SessionData.Type.TCP;
                                         try {
-                                            data.tcpChannel = SocketChannel.open();
-                                            data.tcpChannel.configureBlocking(false);
-                                            data.tcpChannel.connect(socket);
-                                            long time = Instant.now().toEpochMilli();
-                                            while (!data.tcpChannel.finishConnect()) {
-                                                if (Instant.now().toEpochMilli() > time + timeout)
-                                                    throw new ConnectException("timeout");
-                                            }
-                                            ConnectionResponsePacket packet = new ConnectionResponsePacket(
-                                                ConnectionResponsePacket.ResponseCode.SUCCEEDED,
-                                                AddressType.IPV4,
-                                                new byte[]{0, 0, 0, 0},
-                                                (short) 0
-                                            );
-                                            packet.write(secondaryBuffer);
-                                            secondaryBuffer.flip();
-                                            channel.write(secondaryBuffer);
+                                            ConnectionHandler.ConnectionInformation info = new ConnectionHandler.ConnectionInformation(socket, ConnectionHandler.ConnectionProtocolType.TCP, timeout);
+                                            data.readChannel = handler.connect(info);
+                                            sendStatus(ConnectionResponsePacket.ResponseCode.SUCCEEDED, secondaryBuffer, channel);
                                         } catch (SecurityException ex) {
-                                            ex.printStackTrace();
-                                            ConnectionResponsePacket packet = new ConnectionResponsePacket(
-                                                ConnectionResponsePacket.ResponseCode.CONNECTION_NOT_ALLOWED,
-                                                AddressType.IPV4,
-                                                new byte[]{0, 0, 0, 0},
-                                                (short) 0
-                                            );
-                                            packet.write(secondaryBuffer);
-                                            secondaryBuffer.flip();
-                                            channel.write(secondaryBuffer);
+                                            System.err.println(ex.toString());
+                                            sendStatus(ConnectionResponsePacket.ResponseCode.CONNECTION_NOT_ALLOWED, secondaryBuffer, channel);
                                             channel.close();
                                             continue;
                                         } catch (ConnectException ex) {
-                                            ex.printStackTrace();
-                                            ConnectionResponsePacket packet = new ConnectionResponsePacket(
-                                                ConnectionResponsePacket.ResponseCode.HOST_UNREACHABLE,
-                                                AddressType.IPV4,
-                                                new byte[]{0, 0, 0, 0},
-                                                (short) 0
-                                            );
-                                            packet.write(secondaryBuffer);
-                                            secondaryBuffer.flip();
-                                            channel.write(secondaryBuffer);
+                                            System.err.println(ex.toString());
+                                            sendStatus(ConnectionResponsePacket.ResponseCode.HOST_UNREACHABLE, secondaryBuffer, channel);
                                             channel.close();
                                             continue;
                                         } catch (Exception ex) {
-                                            ex.printStackTrace();
-                                            ConnectionResponsePacket packet = new ConnectionResponsePacket(
-                                                ConnectionResponsePacket.ResponseCode.SERVER_ERROR,
-                                                AddressType.IPV4,
-                                                new byte[]{0, 0, 0, 0},
-                                                (short) 0
-                                            );
-                                            packet.write(secondaryBuffer);
-                                            secondaryBuffer.flip();
-                                            channel.write(secondaryBuffer);
+                                            System.err.println(ex.toString());
+                                            sendStatus(ConnectionResponsePacket.ResponseCode.SERVER_ERROR, secondaryBuffer, channel);
                                             channel.close();
                                             continue;
                                         }
@@ -229,14 +183,14 @@ public class SOCKS5Server implements Runnable {
                                         channel.close();
                                     } else {
                                         channel.read(mainBuffer);
-                                        if (!data.tcpChannel.isOpen())
+                                        if (!data.readChannel.isOpen())
                                             channel.close();
                                         mainBuffer.flip();
-                                        data.tcpChannel.write(mainBuffer);
+                                        data.readChannel.write(mainBuffer);
                                     }
                             }
                         }
-                        if (key.isWritable()) {
+                        if (key.isValid() && key.isWritable()) {
                             SocketChannel channel = (SocketChannel) key.channel();
                             SessionData data = (SessionData) key.attachment();
                             if (!channel.isOpen())
@@ -247,9 +201,9 @@ public class SOCKS5Server implements Runnable {
                                         // @TODO: Add support
                                         channel.close();
                                     } else {
-                                        if (!data.tcpChannel.isOpen())
+                                        if (!data.readChannel.isOpen())
                                             channel.close();
-                                        int a = data.tcpChannel.read(mainBuffer);
+                                        int a = data.readChannel.read(mainBuffer);
                                         if (a > 0) {
                                             mainBuffer.flip();
                                             channel.write(mainBuffer);
@@ -257,7 +211,7 @@ public class SOCKS5Server implements Runnable {
                                     }
                             }
                         }
-                        if (key.isAcceptable()) {
+                        if (key.isValid() && key.isAcceptable()) {
                             ServerSocketChannel server = (ServerSocketChannel) key.channel();
                             SocketChannel channel = server.accept();
 
@@ -272,5 +226,17 @@ public class SOCKS5Server implements Runnable {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void sendStatus(ConnectionResponsePacket.ResponseCode hostUnreachable, ByteBuffer secondaryBuffer, ByteChannel channel) throws IOException {
+        ConnectionResponsePacket packet = new ConnectionResponsePacket(
+            hostUnreachable,
+            AddressType.IPV4,
+            new byte[]{0, 0, 0, 0},
+            (short) 0
+        );
+        packet.write(secondaryBuffer);
+        secondaryBuffer.flip();
+        channel.write(secondaryBuffer);
     }
 }
